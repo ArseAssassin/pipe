@@ -1,18 +1,19 @@
 pipe = require "./pipe"
 core = require "./core"
 
-stdin = pipe.stream.fromNode(process.stdin).pipe (it) -> it.toString()
+generators = require "./generators"
 
-error = pipe.stream()
-error
-  .pipe core.log
-  .pipe ->
-    terminate.push 1
-
-
-terminate = pipe.stream()
-terminate.pipe (it) -> process.exit(it)
 module.exports = 
-  error: error
-  stdin: stdin
-  terminate: terminate
+  error: pipe.error
+  stdin: pipe.stream.fromNodeStream(process.stdin).pipe core.str()
+  stdout: pipe.consumer.fromNodeStream(process.stdout)
+  every: (interval, generator=null) -> 
+    if !generator
+      generator = generators.range()
+
+    pipe.producer (s) ->
+      setInterval (->
+        s.push generator.pull()
+      ), interval
+
+

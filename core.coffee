@@ -1,4 +1,9 @@
-tap = (f, it) -> f(it); it
+pipe = require "./pipe"
+
+tap = (f) ->
+  (it) ->
+    f(it)
+    it
 
 take = (n) -> 
     i = 0
@@ -19,26 +24,35 @@ drop = (n) ->
 
 split = (separator) -> (it) -> it.split(separator)
 
+unpack = -> (it) ->
+  pull: (cb) ->
+    for v in it
+      cb(v)
+
+nothing = ->
+  pull: ->
+
+buffer = (f) ->
+  buffer = []
+  (it) ->
+    if f(it)
+      buffer
+    else
+      buffer.push it
+      nothing()
+
+bufferAll = ->
+  buffer (it) ->
+    it == null
+
 module.exports = 
-  id: (it) -> it
+  id: -> (it) -> it
 
-  unpack: (value) ->
-    pipe: (cb) ->
-      for v in value
-        cb(v)
+  unpack: unpack
+  nothing: nothing
 
-  nothing: ->
-    pipe: ->
-
-
-
-  every: (interval) -> generator (s) ->
-    i = 0
-    setInterval((->
-      s.push(i++)
-    ), interval)
-
-
+  buffer: buffer
+  bufferAll: bufferAll
 
   take: take
   drop: drop
@@ -47,24 +61,28 @@ module.exports =
   tail: drop 1
 
   split: split
-  lines: split("\n")
+  lines: -> split("\n")
 
   zip: (data) ->
-    (value) ->
-      [value, data.value()]
+    (it) ->
+      [it, data.pull()]
 
-  flip: (value) -> [value[1], value[0]]
+  flip: -> (it) -> [it[1], it[0]]
 
   map: (f) -> (value) ->
     value.map f
 
-  toObject: (value) ->
+  join: (glue) ->
+    (it) -> it.join(glue)
+
+  toObject: -> (value) ->
     o = {}
     for [k, v] in value
       o[k] = v
     o
 
-  str: (it) -> it.toString()
+  str: -> (it) -> it.toString()
 
   tap: tap
-  log: tap.bind(null, console.log)
+  log: ->
+    tap(console.log)

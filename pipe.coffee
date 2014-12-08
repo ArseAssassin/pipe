@@ -1,91 +1,120 @@
-events = require "events"
+transducer = (input, f) ->
+  s = if f.push
+    f
+  else
+    stream()
 
-module.exports = 
+  input.pull (x) ->
+    if x != null && f.call
+      x = f(x)
+
+    if x != null && x.pull
+      x.pull s.push
+    else
+      s.push(x)
+  s
+
+
 stream = ->
-  emitter = new events.EventEmitter()
+  listeners = []
+
   o = 
+    pipe: (f) ->
+      transducer(o, f)
+
+    pull: (cb) ->
+      listeners.push(cb)
+
     push: (value) ->
-      emitter.emit("value", value)
+      for f in listeners
+        f(value)
+
       if value == null
-        close()
+        o.end()
 
-    pipe: (transducer) ->
-      if transducer.push
-        transducer = transducer.push
-      pipe(emitter, transducer)
+    end: ->
+      listeners = []
 
-    close: ->
-      emitter.removeAllListeners()
+    inherit: (parent) ->
+      setFunction = (k, v) ->
+        result[k] = (args...) ->
+          (o.pipe v args...).inherit(parent)
+
+      result = {}
+
+      for k, v of parent
+        setFunction k, v
+
+      for k, v of o
+        result[k] = v
+
+      result
 
   o
 
 
-pipe = (parent, transducer) ->
-  emitter = new events.EventEmitter()
-  parent.on "value", (value) ->
-    if value == null
-      push value
-    else
-      value = transducer(value)
-      push value
-    
-  close = ->
-    emitter.removeAllListeners()
-
-  push = (value) ->
-    if value == null
-      close()
-      emitter.emit("value", value)
-    else if value.pipe
-      value.pipe (x) -> push(x)
-    else
-      emitter.emit("value", value)
-
-  pipe: (transducer) ->
-    if transducer.push
-      transducer = transducer.push
-    pipe(emitter, transducer)
+consumer =
+  fromNodeStream: (stream) ->
+    push: (value) ->
+      if value == null
+        stream.end()
+      else
+        stream.write(value)
 
 
-signal = (value) ->
-  emitter = new events.EventEmitter()
+pipe = (f) ->
+  e = (it) ->
+    f(it)
 
-  self = 
-    merge: (transducer, stream) ->
-      stream.pipe (x) ->
-        value = transducer(x)
-        emitter.emit "value", value
+  e.pipe = (subroutine) ->
+    pipe (it) ->
+      subroutine(f(it))
 
-      self
-
-    value: ->
-      value
-
-    pipe: (transducer) ->
-      value: -> transducer(value)
-
-  self
+  e
 
 
-
-
-
-generator = (cb) ->
-  s = stream()
-  cb(s)
-  s
-
-stream.fromNode = (s) ->
+stream.fromNodeStream = (s) ->
   _s = stream()
 
-  s.on "readable", ->
-    if line = s.read()
-      _s.push(line)
+  s.on "data", (it) -> 
+    _s.push(it)
+  s.on "end", ->
+    _s.push(null)
 
   _s
 
-module.exports = 
-  stream: stream
-  pipe: pipe
-  signal: signal
-  generator: generator
+
+merged = (parent, stream, f) ->
+  value = parent.pull()
+
+  stream.pull (data) ->
+    value = f(value, data)
+
+  o =
+    merge: (stream, f) ->
+      merged(o, stream, f)
+
+    pull: -> value
+  o
+
+
+signal = (value) ->
+  o = 
+    merge: (stream, f) ->
+      merged(o, stream, f)
+
+    pull: -> value
+
+  o
+
+producer = (f) ->
+  s = stream()
+  f(s)
+  s
+
+pipe.stream = stream
+pipe.consumer = consumer
+pipe.producer = producer
+pipe.signal = signal
+
+module.exports = pipe
